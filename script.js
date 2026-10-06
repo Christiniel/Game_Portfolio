@@ -119,18 +119,48 @@ function setWorkLabel(label, busy){
     el.style.color = '';
   }
 }
-/* GitHub "What's happening" profile status via GraphQL (needs token, even for public) */
-async function fetchGitHubUserStatus(){
+/* ---------- API layer: Cloudflare proxy first, direct GitHub fallback ----------
+   On Cloudflare Pages, /api/github/* is handled by functions/api/_middleware.js,
+   which injects the dashboard GITHUB_TOKEN server-side (secret stays secret).
+   Locally there is no Functions runtime, so calls go direct to api.github.com,
+   optionally with the .env token. Probe result is cached per tab. */
+let proxyChecked = null;
+async function proxyAlive(){
+  if(proxyChecked !== null) return proxyChecked;
+  try{
+    const cached = sessionStorage.getItem('gh_proxy');
+    if(cached === '1'){ proxyChecked = true; return true; }
+    if(cached === '0'){ proxyChecked = false; return false; }
+  }catch(e){}
+  try{
+    const r = await fetch('/api/github/zen', { cache: 'no-store' });
+    proxyChecked = r.ok;
+  }catch(e){ proxyChecked = false; }
+  try{ sessionStorage.setItem('gh_proxy', proxyChecked ? '1' : '0'); }catch(e){}
+  return proxyChecked;
+}
+async function apiFetch(path, init = {}){
+  if(await proxyAlive()){
+    const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
+    return fetch('/api/github' + path, Object.assign({}, init, { headers }));
+  }
+  const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
   const token = (SITE_STATUS.githubToken || '').trim();
-  if(!token) return null;
+  if(token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch('https://api.github.com' + path, Object.assign({}, init, { headers }));
+}
+/* GitHub "What's happening" profile status: via proxy the token is injected
+   server-side; direct calls need the browser (.env) token even for public data */
+async function fetchGitHubUserStatus(){
   const query = 'query($login:String!){ user(login:$login){ status{ message emoji indicatesLimitedAvailability } } }';
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), 8000);
   try{
-    const r = await fetch('https://api.github.com/graphql', {
+    if(!(await proxyAlive()) && !(SITE_STATUS.githubToken || '').trim()) return null;
+    const r = await apiFetch('/graphql', {
       method: 'POST',
       signal: c.signal,
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables: { login: GITHUB_USER } })
     });
     if(!r.ok) return null;
@@ -182,14 +212,15 @@ async function fetchJson(url, ms = 8000){
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), ms);
   try{
-    const headers = { 'Accept': 'application/vnd.github+json' };
-    const token = (SITE_STATUS.githubToken || '').trim();
-    if(token && url.includes('api.github.com')) headers['Authorization'] = `Bearer ${token}`;
-    const r = await fetch(url, { signal: c.signal, headers });
+    const r = url.includes('api.github.com')
+      ? await apiFetch(url.replace('https://api.github.com', ''), { signal: c.signal })
+      : await fetch(url, { signal: c.signal });
     if(r.status === 403){
-      const remaining = r.headers.get('X-RateLimit-Remaining');
-      const err = new Error('Rate limit hit — showing saved quests. Wait a minute.');
-      err.rateLimited = remaining === '0' || true;
+      const reset = r.headers.get('X-RateLimit-Reset');
+      let when = '';
+      if(reset) when = ` Retry in ~${Math.max(1, Math.round((reset * 1000 - Date.now()) / 60000))}m.`;
+      const err = new Error(`Rate limit hit.${when} Set GITHUB_TOKEN in Cloudflare env vars (or .env locally), then redeploy.`);
+      err.rateLimited = true;
       err.status = 403;
       throw err;
     }
@@ -290,12 +321,6 @@ let pi=0, ci=0, del=false;
 })();
 
 /* ---------- GitHub auto-sync (🔒 permanent user) ---------- */
-function ghHeaders(){
-  const h = { 'Accept': 'application/vnd.github+json' };
-  const token = (SITE_STATUS.githubToken || '').trim();
-  if(token) h['Authorization'] = `Bearer ${token}`;
-  return h;
-}
 function saveCache(username, user, repos){
   try{ localStorage.setItem(`gh_cache_${username}`, JSON.stringify({ t: Date.now(), user, repos })); }catch(e){}
 }
@@ -314,11 +339,11 @@ async function loadGitHub(){
 
   try{
     const [uRes, rRes] = await Promise.all([
-      fetch(`https://api.github.com/users/${username}`, { headers: ghHeaders() }),
-      fetch(`https://api.github.com/users/${username}/repos?per_page=${CONFIG.perPage}&sort=updated`, { headers: ghHeaders() })
+      apiFetch(`/users/${username}`),
+      apiFetch(`/users/${username}/repos?per_page=${CONFIG.perPage}&sort=updated`)
     ]);
     if(uRes.status === 403 || rRes.status === 403)
-      throw new Error('Rate limit hit (60/hr without token) — add githubToken in config.js or wait a minute.');
+      throw new Error('Rate limit hit — set GITHUB_TOKEN in Cloudflare env vars (or .env locally), then redeploy.');
     if(uRes.status === 404) throw new Error('GitHub user not found.');
     if(!uRes.ok) throw new Error('Could not load GitHub user.');
     if(!rRes.ok) throw new Error('Could not load repos.');
@@ -415,7 +440,7 @@ async function renderDetail(){
 
   // languages breakdown (non-blocking)
   if(r.name){
-    fetch(`https://api.github.com/repos/${GITHUB_USER}/${r.name}/languages`, { headers: ghHeaders() })
+    apiFetch(`/repos/${GITHUB_USER}/${r.name}/languages`)
       .then(x=>x.ok?x.json():null).then(langs=>{
         const box = $('#lang-bar'); if(!box) return;
         if(!langs || !Object.keys(langs).length){ box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(r.language)}"></i>${escapeHtml(r.language||'code')}</span>`; return; }
@@ -429,7 +454,7 @@ async function renderDetail(){
       }).catch(()=>{});
 
     // README preview (non-blocking)
-    fetch(`https://api.github.com/repos/${GITHUB_USER}/${r.name}/readme`, {headers: Object.assign({}, ghHeaders(), {Accept:'application/vnd.github.raw'})})
+    apiFetch(`/repos/${GITHUB_USER}/${r.name}/readme`, { headers: { Accept: 'application/vnd.github.raw' } })
       .then(x=>x.ok?x.text():null).then(txt=>{
         const box = $('#readme-box'); if(!box) return;
         if(!txt){ box.innerHTML = `<span class="muted">No README found. <a href="${r.html_url}" target="_blank" rel="noopener">Open on GitHub →</a></span>`; return; }
