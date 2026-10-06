@@ -9,16 +9,22 @@ const SITE_LINKS = Object.assign({
   resume: '#contact'
 }, SITE.links || {});
 const SITE_STATUS = Object.assign({
-  openToWork: null, // null = follow GitHub profile status, then `hireable`; true/false = manual override
+  openToWork: null, // null = follow saved snapshot status, then `hireable`; true/false = manual override
+  // NOTE: no token here on purpose. The site runs token-free off github-data.json.
+  // `githubToken` in config.js / `.env` is legacy and intentionally ignored.
   githubToken: '',
   statusMap: {},
   idleAfterDays: 14,
-  offlineAfterDays: 60
+  offlineAfterDays: 60,
+  // How stale the committed snapshot may get before we attempt ONE quiet
+  // background refresh (unauthenticated). Normal loads = 0 API calls.
+  snapshotMaxAgeHours: 24,
+  liveRetryHours: 6,
 }, SITE.status || {});
 const CONFIG = {
   githubUsername: GITHUB_USER,
   perPage: 100,
-  // fallback demo repos (your real quests — shown if API rate-limited/offline)
+  // last-resort fallback if even github-data.json can't load (e.g. file:// without fetch)
   demoRepos: [
     { name: 'MongoBackupRecovery', description: 'An Web-based back up and recovery tool for MongoDB', language: 'JavaScript', stargazers_count: 0, forks_count: 0, watchers_count: 0, open_issues_count: 0, size: 26, default_branch: 'main', created_at: '2026-09-26T10:02:46Z', updated_at: '2026-09-26T10:23:33Z', html_url: 'https://github.com/Christiniel/MongoBackupRecovery', homepage: '', fork: false },
     { name: 'SIA-Lab', description: 'Mysterious quest — no description yet.', language: 'JavaScript', stargazers_count: 0, forks_count: 1, watchers_count: 0, open_issues_count: 0, size: 168, default_branch: 'main', created_at: '2026-04-22T09:01:19Z', updated_at: '2026-04-22T09:02:38Z', html_url: 'https://github.com/Christiniel/SIA-Lab', homepage: '', fork: false },
@@ -30,29 +36,10 @@ const CONFIG = {
 const $ = (s) => document.querySelector(s);
 const detailEl = $('#repo-detail'), statusEl = $('#gh-status'), repoSelect = $('#repo-select');
 let allRepos = [], selectedIdx = 0, coins = parseInt(localStorage.getItem('coins')||'0',10) || 0;
-let lastUser = null, profileLimited = false;
+let lastUser = null, profileLimited = false, snapshotMeta = { fetchedAt: null, lastEventAt: null, profileStatus: null };
 
 const LANG_COLORS = { JavaScript:'#f7df1e', TypeScript:'#3178c6', Python:'#3572A5', HTML:'#e34c26', CSS:'#563d7c', Java:'#b07219', 'C++':'#f34b7d', Go:'#00ADD8', Rust:'#dea584', Shell:'#89e051', Vue:'#41b883', Svelte:'#ff3e00' };
 const langColor = (l) => LANG_COLORS[l] || '#2EC4B6';
-
-/* ---------- .env loader (GITHUB_TOKEN) ---------- */
-async function loadEnv(){
-  // config.js value wins if already set; otherwise try `.env` (gitignored).
-  if((SITE_STATUS.githubToken || '').trim()) return;
-  try{
-    const r = await fetch('.env', { cache: 'no-store' });
-    if(!r.ok) return;
-    const txt = await r.text();
-    for(const line of txt.split('\n')){
-      const t = line.trim();
-      if(!t || t.startsWith('#') || !t.includes('=')) continue;
-      const i = t.indexOf('=');
-      const k = t.slice(0, i).trim();
-      const v = t.slice(i + 1).trim().replace(/^["']|["']$/g, '');
-      if(k === 'GITHUB_TOKEN' && v){ SITE_STATUS.githubToken = v; return; }
-    }
-  }catch(e){ /* file:// or missing .env — stay unauthenticated */ }
-}
 
 /* ---------- Editable links (from config.js) ---------- */
 function applyLinks(){
@@ -86,7 +73,7 @@ function applyLinks(){
   if(badgeUser) badgeUser.textContent = '@' + GITHUB_USER;
 }
 
-/* ---------- Responsive live status (GitHub-checked) ---------- */
+/* ---------- Responsive live status (offline-first, no token) ---------- */
 function setAvatarStatus(mode, label){
   const dot = $('#status-dot'), txt = $('#avatar-status-text');
   if(!dot || !txt) return;
@@ -119,57 +106,8 @@ function setWorkLabel(label, busy){
     el.style.color = '';
   }
 }
-/* ---------- API layer: Cloudflare proxy first, direct GitHub fallback ----------
-   On Cloudflare Pages, /api/github/* is handled by functions/api/_middleware.js,
-   which injects the dashboard GITHUB_TOKEN server-side (secret stays secret).
-   Locally there is no Functions runtime, so calls go direct to api.github.com,
-   optionally with the .env token. Probe result is cached per tab. */
-let proxyChecked = null;
-async function proxyAlive(){
-  if(proxyChecked !== null) return proxyChecked;
-  try{
-    const cached = sessionStorage.getItem('gh_proxy');
-    if(cached === '1'){ proxyChecked = true; return true; }
-    if(cached === '0'){ proxyChecked = false; return false; }
-  }catch(e){}
-  try{
-    const r = await fetch('/api/github/zen', { cache: 'no-store' });
-    proxyChecked = r.ok;
-  }catch(e){ proxyChecked = false; }
-  try{ sessionStorage.setItem('gh_proxy', proxyChecked ? '1' : '0'); }catch(e){}
-  return proxyChecked;
-}
-async function apiFetch(path, init = {}){
-  if(await proxyAlive()){
-    const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
-    return fetch('/api/github' + path, Object.assign({}, init, { headers }));
-  }
-  const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
-  const token = (SITE_STATUS.githubToken || '').trim();
-  if(token) headers['Authorization'] = `Bearer ${token}`;
-  return fetch('https://api.github.com' + path, Object.assign({}, init, { headers }));
-}
-/* GitHub "What's happening" profile status: via proxy the token is injected
-   server-side; direct calls need the browser (.env) token even for public data */
-async function fetchGitHubUserStatus(){
-  const query = 'query($login:String!){ user(login:$login){ status{ message emoji indicatesLimitedAvailability } } }';
-  const c = new AbortController();
-  const t = setTimeout(() => c.abort(), 8000);
-  try{
-    if(!(await proxyAlive()) && !(SITE_STATUS.githubToken || '').trim()) return null;
-    const r = await apiFetch('/graphql', {
-      method: 'POST',
-      signal: c.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables: { login: GITHUB_USER } })
-    });
-    if(!r.ok) return null;
-    const j = await r.json();
-    return (j && j.data && j.data.user && j.data.user.status) || null;
-  }catch(e){ return null; }
-  finally { clearTimeout(t); }
-}
-/* Map a profile status like "Out sick" / "Open to work" onto line 97 badge */
+/* Profile status comes from the saved snapshot (collected at sync time),
+   never from a live token-authenticated call. */
 function applyProfileStatus(st){
   if(!st || !st.message) return false;
   const raw = String(st.message).trim();
@@ -208,6 +146,54 @@ function setGhApi(state, label){
   dot.className = 'mini-dot ' + state; // ok | warn | down
   txt.textContent = label;
 }
+/* ---------- Cloudflare proxy layer (uses dashboard GITHUB_TOKEN server-side) ----------
+   On Cloudflare Pages, /api/github/* is handled by functions/api/_middleware.js,
+   which injects the GITHUB_TOKEN secret server-side — the browser never sees it.
+   Locally (python http.server) there is no Functions runtime, so we fall back to
+   direct api.github.com calls. Probe result is cached per tab. */
+let proxyChecked = null;
+let proxyAuth = null; // 'authenticated' | 'anonymous' | null (null = no proxy / local)
+async function proxyAlive(){
+  if(proxyChecked !== null) return proxyChecked;
+  try{
+    const cached = sessionStorage.getItem('gh_proxy');
+    if(cached === '1'){ proxyChecked = true; proxyAuth = sessionStorage.getItem('gh_proxy_auth') || null; return true; }
+    if(cached === '0'){ proxyChecked = false; proxyAuth = null; return false; }
+  }catch(e){}
+  try{
+    const r = await fetch('/api/github/zen', { cache: 'no-store' });
+    proxyChecked = r.ok;
+    // Safe boolean flag set server-side (never the token value itself).
+    proxyAuth = proxyChecked ? (r.headers.get('x-proxy-auth') || 'anonymous') : null;
+  }catch(e){ proxyChecked = false; proxyAuth = null; }
+  try{
+    sessionStorage.setItem('gh_proxy', proxyChecked ? '1' : '0');
+    if(proxyAuth) sessionStorage.setItem('gh_proxy_auth', proxyAuth);
+  }catch(e){}
+  return proxyChecked;
+}
+/* Quest-log line reporting whether the server-side token is active.
+   Safe: only reports the boolean proxy flag, never any secret value. */
+async function logTokenStatus(){
+  try{ await proxyAlive(); }catch(e){}
+  if(proxyChecked && proxyAuth === 'authenticated'){
+    log('> GitHub token: IN USE via Cloudflare proxy (server-side) 🔒');
+  } else if(proxyChecked){
+    log('> GitHub token: NOT SET — proxy anonymous (60/hr limit) ⚠');
+  } else {
+    log('> GitHub token: not via proxy (local snapshot mode, no browser token)');
+  }
+}
+async function apiFetch(path, init = {}){
+  // path like `/users/xxx` — routed via proxy when deployed, direct locally.
+  // Never sends any token from the browser; the proxy adds GITHUB_TOKEN itself.
+  if(await proxyAlive()){
+    const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
+    return fetch('/api/github' + path, Object.assign({}, init, { headers }));
+  }
+  const headers = Object.assign({ Accept: 'application/vnd.github+json' }, init.headers || {});
+  return fetch('https://api.github.com' + path, Object.assign({}, init, { headers }));
+}
 async function fetchJson(url, ms = 8000){
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), ms);
@@ -216,10 +202,7 @@ async function fetchJson(url, ms = 8000){
       ? await apiFetch(url.replace('https://api.github.com', ''), { signal: c.signal })
       : await fetch(url, { signal: c.signal });
     if(r.status === 403){
-      const reset = r.headers.get('X-RateLimit-Reset');
-      let when = '';
-      if(reset) when = ` Retry in ~${Math.max(1, Math.round((reset * 1000 - Date.now()) / 60000))}m.`;
-      const err = new Error(`Rate limit hit.${when} Set GITHUB_TOKEN in Cloudflare env vars (or .env locally), then redeploy.`);
+      const err = new Error('GitHub rate limit reached — showing saved snapshot.');
       err.rateLimited = true;
       err.status = 403;
       throw err;
@@ -228,64 +211,50 @@ async function fetchJson(url, ms = 8000){
     return await r.json();
   } finally { clearTimeout(t); }
 }
-async function checkLiveStatus(user){
+/* Status is derived from saved data (snapshot.lastEventAt / user.updated_at).
+   No GitHub API call here — that's what keeps normal page loads at 0 requests. */
+function checkLiveStatus(user){
   if(user) lastUser = user;
   user = user || lastUser;
   profileLimited = false;
-  // 1) line 97 badge: config override > GitHub "What's happening" > `hireable`
+  // 1) badge: config override > saved snapshot profile status > `hireable`
   let fromProfile = false;
   if(SITE_STATUS.openToWork !== null && SITE_STATUS.openToWork !== undefined){
     setWorkStatus(!!SITE_STATUS.openToWork);
   } else {
-    const st = await fetchGitHubUserStatus();
-    fromProfile = applyProfileStatus(st);
+    fromProfile = applyProfileStatus(snapshotMeta.profileStatus);
     if(!fromProfile){
       if(user && typeof user.hireable === 'boolean') setWorkStatus(user.hireable);
       else setWorkStatus(true);
     }
   }
 
-  // 2) activity status from last public event (browsing github.com creates NO event)
-  setAvatarStatus('checking', 'CHECKING…');
+  // 2) activity from saved timestamps (no events API call)
   if(!navigator.onLine){
     setAvatarStatus('offline', 'OFFLINE');
   } else {
-    try{
-      const events = await fetchJson(`https://api.github.com/users/${GITHUB_USER}/events/public?per_page=5`);
-      const last = events && events[0] && events[0].created_at;
-      if(!last){
-        // no PUBLIC events (private-only or quiet account) — fall back to
-        // profile updated_at so an active account doesn't read IDLE
-        const upd = user && user.updated_at ? (Date.now() - new Date(user.updated_at).getTime()) / 864e5 : Infinity;
-        if(upd <= SITE_STATUS.idleAfterDays) setAvatarStatus('ONLINE', 'ONLINE');
-        else setAvatarStatus('idle', 'IDLE');
-      }
-      else{
-        const days = (Date.now() - new Date(last).getTime()) / 864e5;
-        if(profileLimited){ setAvatarStatus('idle', 'IDLE'); }
-        else if(days <= SITE_STATUS.idleAfterDays) setAvatarStatus('ONLINE', 'ONLINE');
-        else if(days <= SITE_STATUS.offlineAfterDays) setAvatarStatus('idle', 'IDLE');
-        else setAvatarStatus('offline', 'OFFLINE');
-      }
-    }catch(e){
-      // rate-limited but we HAVE a live user object = GitHub is reachable,
-      // so don't punish with IDLE — show ONLINE, not a false IDLE
-      if(user && user.login) setAvatarStatus('ONLINE', 'ONLINE');
-      else setAvatarStatus('idle', 'IDLE?');
+    const last = snapshotMeta.lastEventAt || (user && user.updated_at);
+    if(!last){
+      setAvatarStatus('ONLINE', 'ONLINE');
+    } else {
+      const days = (Date.now() - new Date(last).getTime()) / 864e5;
+      if(profileLimited){ setAvatarStatus('idle', 'IDLE'); }
+      else if(days <= SITE_STATUS.idleAfterDays) setAvatarStatus('ONLINE', 'ONLINE');
+      else if(days <= SITE_STATUS.offlineAfterDays) setAvatarStatus('idle', 'IDLE');
+      else setAvatarStatus('offline', 'OFFLINE');
     }
   }
 
-  // 3) github.com platform health (non-blocking, never fails the UI)
+  // 3) github.com platform health (non-blocking, never fails the UI, not rate-limited)
   setGhApi('', 'GitHub: checking…');
-  try{
-    const s = await fetchJson('https://www.githubstatus.com/api/v2/status.json', 7000);
+  fetchJson('https://www.githubstatus.com/api/v2/status.json', 7000).then(s => {
     const ind = s && s.status && s.status.indicator;
     if(ind === 'none') setGhApi('ok', 'GitHub: OPERATIONAL');
     else if(ind === 'minor') setGhApi('warn', 'GitHub: DEGRADED');
     else setGhApi('down', 'GitHub: ' + String(ind || 'ISSUE').toUpperCase());
-  }catch(e){
+  }).catch(() => {
     setGhApi('', 'GitHub: UNKNOWN');
-  }
+  });
 }
 window.addEventListener('online', () => checkLiveStatus());
 window.addEventListener('offline', () => {
@@ -309,7 +278,7 @@ function blip(freq=440, dur=0.08, type='square'){
 const coinSfx = () => { blip(988,.07); setTimeout(()=>blip(1319,.12),70); };
 
 /* ---------- Typewriter ---------- */
-const phrases = ['Full-Stack Developer', 'JavaScript + Python / Flask', 'MongoDB Backup Tool Builder', 'Open Source Quester'];	
+const phrases = ['Full-Stack Developer', 'JavaScript + Python / Flask', 'MongoDB Backup Tool Builder', 'Open Source Quester'];
 let pi=0, ci=0, del=false;
 (function type(){
   const el = $('#typewriter'); if(!el) return;
@@ -320,79 +289,171 @@ let pi=0, ci=0, del=false;
   setTimeout(type, del?30:70);
 })();
 
-/* ---------- GitHub auto-sync (🔒 permanent user) ---------- */
-function saveCache(username, user, repos){
-  try{ localStorage.setItem(`gh_cache_${username}`, JSON.stringify({ t: Date.now(), user, repos })); }catch(e){}
-}
-function loadCache(username){
+/* ---------- Token-free data layer (browser never holds a token) ----------
+   Priority: github-data.json (committed snapshot, 0 API cost) >
+             localStorage live refresh (throttled) >
+             hard-coded demoRepos (last resort).
+   Live refresh goes via /api/github when deployed on Cloudflare Pages
+   (Functions injects the dashboard GITHUB_TOKEN secret server-side),
+   else direct to api.github.com. Failures silently keep the snapshot. */
+const SNAP_KEY = `gh_live_${GITHUB_USER}`;
+const CHECK_KEY = `gh_lastcheck_${GITHUB_USER}`;
+const LANG_TTL = 7 * 864e5, README_TTL = 7 * 864e5;
+
+function readLiveCache(){
   try{
-    const c = JSON.parse(localStorage.getItem(`gh_cache_${username}`) || 'null');
+    const c = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null');
     if(c && Array.isArray(c.repos) && c.repos.length) return c;
   }catch(e){}
   return null;
 }
-async function loadGitHub(){
+function writeLiveCache(user, repos, lastEventAt){
+  try{ localStorage.setItem(SNAP_KEY, JSON.stringify({ t: Date.now(), user, repos, lastEventAt })); }catch(e){}
+}
+function lastCheck(){
+  try{ return parseInt(localStorage.getItem(CHECK_KEY) || '0', 10) || 0; }catch(e){ return 0; }
+}
+function markChecked(){ try{ localStorage.setItem(CHECK_KEY, String(Date.now())); }catch(e){} }
+function snapshotAgeHours(){
+  if(!snapshotMeta.fetchedAt) return Infinity;
+  return (Date.now() - new Date(snapshotMeta.fetchedAt).getTime()) / 36e5;
+}
+function fmtAge(iso){
+  if(!iso) return 'unknown date';
+  const mins = Math.max(1, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  if(mins < 60) return `${mins}m ago`;
+  const h = Math.round(mins / 60);
+  if(h < 48) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+async function loadSnapshotFile(){
+  const r = await fetch('github-data.json', { cache: 'no-store' });
+  if(!r.ok) throw new Error('no snapshot file');
+  return r.json();
+}
+
+function renderUser(user, repos){
+  $('#avatar').src = user.avatar_url;
+  $('#dialog-name').textContent = '@' + user.login;
+  $('#github-bio').textContent = user.bio || `${user.name || user.login} • ${user.public_repos} public quests.`;
+  $('#link-github').href = user.html_url;
+  $('#stat-repos').textContent = user.public_repos;
+  $('#stat-followers').textContent = user.followers;
+  const visible = repos.filter(r => !r.fork);
+  $('#stat-stars').textContent = (visible.length ? visible : repos).reduce((a, r) => a + (r.stargazers_count || 0), 0);
+  $('#hero-name').textContent = (user.name || user.login).toUpperCase().slice(0, 24);
+}
+
+async function loadGitHub(opts = {}){
+  const { forceRefresh = false } = opts;
   const username = GITHUB_USER;
   statusEl.textContent = `⏳ Summoning @${username}...`;
   detailEl.innerHTML = '<div class="skel"></div>';
-  blip(600,.08);
+  if(!forceRefresh) blip(600, .08);
 
+  // 1) Snapshot first — instant, zero API calls.
+  let snap = null;
+  try { snap = await loadSnapshotFile(); }
+  catch(e){ /* file:// or missing file — fall through to caches */ }
+
+  const live = readLiveCache();
+  // Prefer whichever is fresher: committed snapshot vs previous live refresh.
+  let user = null, repos = null, source = '';
+  if(snap && snap.repos){
+    snapshotMeta = { fetchedAt: snap.fetchedAt || null, lastEventAt: snap.lastEventAt || null, profileStatus: snap.profileStatus || null };
+    user = snap.user; repos = snap.repos; source = `snapshot (${fmtAge(snap.fetchedAt)})`;
+  }
+  if(live && live.user){
+    const liveTime = live.t || 0;
+    const snapTime = snap && snap.fetchedAt ? new Date(snap.fetchedAt).getTime() : 0;
+    if(liveTime > snapTime){
+      user = live.user; repos = live.repos;
+      snapshotMeta.lastEventAt = live.lastEventAt || snapshotMeta.lastEventAt;
+      source = `last live sync (${fmtAge(new Date(liveTime).toISOString())})`;
+    }
+  }
+
+  if(user && repos){
+    renderFromData(user, repos, `✔ ${repos.filter(r => !r.fork).length || repos.length} quests loaded from ${source} • 🔒 LOCKED`);
+    checkLiveStatus(user);
+    // Quiet background refresh only if stale (or forced via RESYNC).
+    const stale = snapshotAgeHours() > (SITE_STATUS.snapshotMaxAgeHours || 24);
+    const retryDue = (Date.now() - lastCheck()) > ((SITE_STATUS.liveRetryHours || 6) * 36e5);
+    if(forceRefresh || (stale && retryDue && navigator.onLine)){
+      refreshLiveData(user, repos, forceRefresh);
+    }
+    return;
+  }
+
+  // 2) No snapshot & no live cache — last resort demo list (still no token needed).
+  allRepos = CONFIG.demoRepos.map(r => ({
+    ...r,
+    html_url: r.html_url.replace(/github\.com\/[^/]+/, `github.com/${GITHUB_USER}`)
+  }));
+  buildRepoDropdown();
+  statusEl.textContent = '⚠ Showing built-in quests (github-data.json missing). Run: node tools/sync-github.mjs';
+  log('> No snapshot found — showing built-in quests.');
+  checkLiveStatus(null);
+}
+
+function renderFromData(user, repos, msg){
+  const visible = repos.filter(r => !r.fork);
+  allRepos = [...(visible.length ? visible : repos)].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  renderUser(user, repos);
+  buildRepoDropdown();
+  statusEl.textContent = msg;
+  log(`> Loaded ${allRepos.length} repos for @${user.login} (0 API calls)`);
+  blip(880, .1); setTimeout(() => blip(1174, .14), 90);
+}
+
+/* Best-effort live refresh: 2 requests (user + repos) via Cloudflare proxy when
+   deployed (server-side GITHUB_TOKEN, 5000/hr) else direct (60/hr).
+   403/rate-limit/offline → silently keep snapshot. Browser never holds a token. */
+async function refreshLiveData(prevUser, prevRepos, noisy){
+  if(noisy) statusEl.textContent = `⏳ Resyncing @${GITHUB_USER}... (1–2 API calls, cached for hours)`;
+  markChecked();
   try{
     const [uRes, rRes] = await Promise.all([
-      apiFetch(`/users/${username}`),
-      apiFetch(`/users/${username}/repos?per_page=${CONFIG.perPage}&sort=updated`)
+      apiFetch(`/users/${GITHUB_USER}`),
+      apiFetch(`/users/${GITHUB_USER}/repos?per_page=${CONFIG.perPage}&sort=updated`),
     ]);
-    if(uRes.status === 403 || rRes.status === 403)
-      throw new Error('Rate limit hit — set GITHUB_TOKEN in Cloudflare env vars (or .env locally), then redeploy.');
+    if(uRes.status === 403 || rRes.status === 403) throw new Error('rate-limited');
     if(uRes.status === 404) throw new Error('GitHub user not found.');
     if(!uRes.ok) throw new Error('Could not load GitHub user.');
     if(!rRes.ok) throw new Error('Could not load repos.');
     const user = await uRes.json();
-    let repos = await rRes.json();
-    repos = repos.filter(r=>!r.fork);
-    if(!repos.length) repos = await rRes.json();
-
-    $('#avatar').src = user.avatar_url;
-    $('#dialog-name').textContent = '@'+user.login;
-    $('#github-bio').textContent = user.bio || `${user.name||user.login} • ${user.public_repos} public quests.`;
-    $('#link-github').href = user.html_url;
-    $('#stat-repos').textContent = user.public_repos;
-    $('#stat-followers').textContent = user.followers;
-    $('#stat-stars').textContent = repos.reduce((a,r)=>a+(r.stargazers_count||0),0);
-    $('#hero-name').textContent = (user.name||user.login).toUpperCase().slice(0,24);
-
-    allRepos = [...repos].sort((a,b)=>new Date(b.updated_at)-new Date(a.updated_at));
-    saveCache(username, user, allRepos);
-    buildRepoDropdown();
-    statusEl.textContent = `✔ ${repos.length} quests synced from @${username} • 🔒 LOCKED`;
-    log(`> Loaded ${repos.length} repos from @${username}`);
-    blip(880,.1); setTimeout(()=>blip(1174,.14),90);
-    checkLiveStatus(user);
-  }catch(err){
-    // prefer last LIVE fetch over hard-coded demo so it never looks stale
-    const cached = loadCache(username);
-    if(cached){
-      allRepos = cached.repos;
-      if(cached.user){
-        $('#avatar').src = cached.user.avatar_url || $('#avatar').src;
-        $('#stat-repos').textContent = cached.user.public_repos ?? '--';
-        $('#stat-followers').textContent = cached.user.followers ?? '--';
-      }
-      buildRepoDropdown();
-      const age = Math.round((Date.now() - cached.t) / 60000);
-      statusEl.textContent = `⚠ ${err.message} — showing last live sync (${age}m ago).`;
-      log(`> ERROR: ${err.message} (cached)`);
-      checkLiveStatus(cached.user || null);
-      return;
-    }
-    allRepos = CONFIG.demoRepos.map(r => ({
+    const repos = await rRes.json();
+    // Merge embedded snapshot extras (languages/readme) so refresh doesn't lose them.
+    const extraByName = {};
+    (prevRepos || []).forEach(r => { extraByName[r.name] = r; });
+    const merged = repos.map(r => ({
       ...r,
-      html_url: r.html_url.replace(/github\.com\/[^/]+/, `github.com/${GITHUB_USER}`)
+      languages: r.languages || (extraByName[r.name] && extraByName[r.name].languages) || null,
+      readmePreview: (extraByName[r.name] && extraByName[r.name].readmePreview) || null,
     }));
-    buildRepoDropdown();
-    statusEl.textContent = `⚠ ${err.message} — showing saved quests.`;
-    log(`> ERROR: ${err.message}`);
-    checkLiveStatus(null);
+    // lastEventAt: keep snapshot value; try ONE events call, ignore failures.
+    let lastEventAt = snapshotMeta.lastEventAt;
+    try{
+      const ev = await fetchJson(`https://api.github.com/users/${GITHUB_USER}/events/public?per_page=1`, 6000);
+      if(Array.isArray(ev) && ev[0] && ev[0].created_at) lastEventAt = ev[0].created_at;
+    }catch(e){ /* events endpoint is optional */ }
+    writeLiveCache(user, merged, lastEventAt);
+    if(lastEventAt) snapshotMeta.lastEventAt = lastEventAt;
+    renderFromData(user, merged, `✔ ${merged.length} quests resynced just now • next refresh in ~${SITE_STATUS.liveRetryHours || 6}h`);
+    checkLiveStatus(user);
+    // Report whether this resync rode the server-side token or anonymous limit.
+    if(proxyAuth === 'authenticated'){
+      log('> Resync used GitHub token via Cloudflare proxy 🔒');
+    } else if(proxyChecked){
+      log('> Resync anonymous (no server token) — 60/hr limit ⚠');
+    } else {
+      log('> Resync direct (no proxy, no browser token)');
+    }
+  }catch(err){
+    // Stay on snapshot — never an error state, never asks for a token.
+    if(noisy) statusEl.textContent = `⚠ Live resync skipped (${err.rateLimited ? 'rate limit' : 'offline / API busy'}) — showing saved snapshot. Try again later.`;
+    log(`> Live refresh skipped: ${err.message} (snapshot kept, 0 harm)`);
   }
 }
 
@@ -407,25 +468,98 @@ function buildRepoDropdown(){
 
 function fmtDate(d){ try{ return new Date(d).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }catch(e){ return '—'; } }
 
+/* Cached per-repo extras: snapshot value > localStorage (7d TTL) > live fetch (cached after). */
+function readExtra(kind, repoName){
+  try{
+    const c = JSON.parse(localStorage.getItem(`gh_${kind}_${GITHUB_USER}_${repoName}`) || 'null');
+    if(c && (Date.now() - c.t) < (kind === 'lang' ? LANG_TTL : README_TTL)) return c.v;
+  }catch(e){}
+  return undefined;
+}
+function writeExtra(kind, repoName, v){
+  try{ localStorage.setItem(`gh_${kind}_${GITHUB_USER}_${repoName}`, JSON.stringify({ t: Date.now(), v })); }catch(e){}
+}
+
+function renderLangBar(r){
+  const box = $('#lang-bar'); if(!box) return;
+  if(r.languages && Object.keys(r.languages).length){
+    paintLangs(box, r.languages, r.language);
+    return;
+  }
+  const cached = readExtra('lang', r.name);
+  if(cached && Object.keys(cached).length){ paintLangs(box, cached, r.language); return; }
+  if(cached){ box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(r.language)}"></i>${escapeHtml(r.language || 'code')}</span>`; return; }
+  apiFetch(`/repos/${GITHUB_USER}/${r.name}/languages`)
+    .then(x => x.ok ? x.json() : null).then(langs => {
+      if(!langs || !Object.keys(langs).length){
+        box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(r.language)}"></i>${escapeHtml(r.language || 'code')}</span>`;
+        writeExtra('lang', r.name, {});
+        return;
+      }
+      writeExtra('lang', r.name, langs);
+      if(document.querySelector('#lang-bar') === box) paintLangs(box, langs, r.language);
+    }).catch(() => {
+      box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(r.language)}"></i>${escapeHtml(r.language || 'code')}</span>`;
+    });
+}
+function paintLangs(box, langs, fallback){
+  if(!langs || !Object.keys(langs).length){
+    box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(fallback)}"></i>${escapeHtml(fallback || 'code')}</span>`;
+    return;
+  }
+  const total = Object.values(langs).reduce((a, b) => a + b, 0);
+  const top = Object.entries(langs).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  box.innerHTML = `<div class="lang-segments">` + top.map(([l, v]) =>
+    `<span style="width:${(v / total * 100).toFixed(1)}%;background:${langColor(l)}" title="${escapeHtml(l)} ${(v / total * 100).toFixed(1)}%"></span>`
+  ).join('') + `</div><div class="lang-labels">` + top.map(([l, v]) =>
+    `<span><i class="lang-dot" style="background:${langColor(l)}"></i>${escapeHtml(l)} ${(v / total * 100).toFixed(0)}%</span>`
+  ).join('') + `</div>`;
+}
+function renderReadme(r){
+  const box = $('#readme-box'); if(!box) return;
+  if(r.readmePreview){
+    paintReadme(box, r.readmePreview, r.readmePreview.length >= 1200, r.html_url);
+    return;
+  }
+  const cached = readExtra('readme', r.name);
+  if(cached !== undefined){
+    if(!cached){ box.innerHTML = `<span class="muted">No README found. <a href="${r.html_url}" target="_blank" rel="noopener">Open on GitHub →</a></span>`; return; }
+    paintReadme(box, cached, false, r.html_url);
+    return;
+  }
+  apiFetch(`/repos/${GITHUB_USER}/${r.name}/readme`, { headers: { Accept: 'application/vnd.github.raw' } })
+    .then(x => x.ok ? x.text() : null).then(txt => {
+      if(document.querySelector('#readme-box') !== box) return;
+      if(!txt){ box.innerHTML = `<span class="muted">No README found. <a href="${r.html_url}" target="_blank" rel="noopener">Open on GitHub →</a></span>`; writeExtra('readme', r.name, null); return; }
+      writeExtra('readme', r.name, txt.slice(0, 1200));
+      paintReadme(box, txt.slice(0, 900), txt.length > 900, r.html_url);
+    }).catch(() => {
+      if(document.querySelector('#readme-box') === box) box.innerHTML = `<span class="muted">README unavailable offline. <a href="${r.html_url}" target="_blank" rel="noopener">Open on GitHub →</a></span>`;
+    });
+}
+function paintReadme(box, preview, truncated, url){
+  box.innerHTML = `<h4>📖 README PREVIEW</h4><pre>${escapeHtml(preview)}${truncated ? '…' : ''}</pre><a href="${url}" target="_blank" rel="noopener">Read full on GitHub →</a>`;
+}
+
 async function renderDetail(){
   const r = allRepos[selectedIdx];
   if(!r){ detailEl.innerHTML = '<p class="status">∅ No quests found.</p>'; return; }
-  $('#quest-counter').textContent = `${selectedIdx+1} / ${allRepos.length}`;
+  $('#quest-counter').textContent = `${selectedIdx + 1} / ${allRepos.length}`;
 
   detailEl.innerHTML = `
     <article class="repo-detail pixel-box-sm">
       <div class="detail-head">
         <h3>${escapeHtml(r.name)}</h3>
-        <span class="detail-badge">${escapeHtml(r.language||'misc')}</span>
+        <span class="detail-badge">${escapeHtml(r.language || 'misc')}</span>
       </div>
-      <p class="detail-desc">${escapeHtml(r.description||'No description — mysterious quest.')}</p>
+      <p class="detail-desc">${escapeHtml(r.description || 'No description — mysterious quest.')}</p>
       <div class="detail-stats">
-        <span>★ ${r.stargazers_count??0} stars</span>
-        <span>⑂ ${r.forks_count??0} forks</span>
-        <span>👁 ${r.watchers_count??0} watchers</span>
-        <span>❗ ${r.open_issues_count??0} issues</span>
-        <span>💾 ${r.size??0} KB</span>
-        <span>🌿 ${escapeHtml(r.default_branch||'main')}</span>
+        <span>★ ${r.stargazers_count ?? 0} stars</span>
+        <span>⑂ ${r.forks_count ?? 0} forks</span>
+        <span>👁 ${r.watchers_count ?? 0} watchers</span>
+        <span>❗ ${r.open_issues_count ?? 0} issues</span>
+        <span>💾 ${r.size ?? 0} KB</span>
+        <span>🌿 ${escapeHtml(r.default_branch || 'main')}</span>
       </div>
       <div class="detail-dates muted">
         <span>created ${fmtDate(r.created_at)}</span> • <span>updated ${fmtDate(r.updated_at)}</span>
@@ -434,39 +568,20 @@ async function renderDetail(){
       <div id="readme-box" class="readme-box"><span class="muted">loading README...</span></div>
       <div class="repo-foot">
         <a class="btn btn-small" href="${r.html_url}" target="_blank" rel="noopener">VIEW CODE ▶</a>
-        ${r.homepage?`<a class="btn btn-small btn-alt" href="${r.homepage}" target="_blank" rel="noopener">LIVE DEMO ▶</a>`:''}
+        ${r.homepage ? `<a class="btn btn-small btn-alt" href="${r.homepage}" target="_blank" rel="noopener">LIVE DEMO ▶</a>` : ''}
       </div>
     </article>`;
 
-  // languages breakdown (non-blocking)
+  // Prefer embedded snapshot data — 0 API calls in the common case.
   if(r.name){
-    apiFetch(`/repos/${GITHUB_USER}/${r.name}/languages`)
-      .then(x=>x.ok?x.json():null).then(langs=>{
-        const box = $('#lang-bar'); if(!box) return;
-        if(!langs || !Object.keys(langs).length){ box.innerHTML = `<span><i class="lang-dot" style="background:${langColor(r.language)}"></i>${escapeHtml(r.language||'code')}</span>`; return; }
-        const total = Object.values(langs).reduce((a,b)=>a+b,0);
-        const top = Object.entries(langs).sort((a,b)=>b[1]-a[1]).slice(0,4);
-        box.innerHTML = `<div class="lang-segments">` + top.map(([l,v])=>
-          `<span style="width:${(v/total*100).toFixed(1)}%;background:${langColor(l)}" title="${escapeHtml(l)} ${(v/total*100).toFixed(1)}%"></span>`
-        ).join('') + `</div><div class="lang-labels">` + top.map(([l,v])=>
-          `<span><i class="lang-dot" style="background:${langColor(l)}"></i>${escapeHtml(l)} ${(v/total*100).toFixed(0)}%</span>`
-        ).join('') + `</div>`;
-      }).catch(()=>{});
-
-    // README preview (non-blocking)
-    apiFetch(`/repos/${GITHUB_USER}/${r.name}/readme`, { headers: { Accept: 'application/vnd.github.raw' } })
-      .then(x=>x.ok?x.text():null).then(txt=>{
-        const box = $('#readme-box'); if(!box) return;
-        if(!txt){ box.innerHTML = `<span class="muted">No README found. <a href="${r.html_url}" target="_blank" rel="noopener">Open on GitHub →</a></span>`; return; }
-        const preview = txt.slice(0,900);
-        box.innerHTML = `<h4>📖 README PREVIEW</h4><pre>${escapeHtml(preview)}${txt.length>900?'…':''}</pre><a href="${r.html_url}" target="_blank" rel="noopener">Read full on GitHub →</a>`;
-      }).catch(()=>{});
+    renderLangBar(r);
+    renderReadme(r);
   }
 }
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---------- Events ---------- */
-$('#refresh-btn').onclick = () => loadGitHub();
+$('#refresh-btn').onclick = () => loadGitHub({ forceRefresh: true });
 repoSelect.addEventListener('change', (e)=>{ selectedIdx = parseInt(e.target.value,10)||0; blip(700,.06); renderDetail(); });
 $('#prev-repo').onclick = ()=>{ if(!allRepos.length) return; selectedIdx = (selectedIdx-1+allRepos.length)%allRepos.length; repoSelect.value=String(selectedIdx); blip(500,.06); renderDetail(); };
 $('#next-repo').onclick = ()=>{ if(!allRepos.length) return; selectedIdx = (selectedIdx+1)%allRepos.length; repoSelect.value=String(selectedIdx); blip(800,.06); renderDetail(); };
@@ -536,12 +651,13 @@ $('#contact-form').addEventListener('submit',(e)=>{
   setTimeout(()=> $('#form-msg').textContent='',4000);
 });
 
-/* init */
+/* init — token-free: straight to snapshot, zero API calls on load.
+   (Background RESYNC uses the Cloudflare proxy when deployed, so the
+   dashboard GITHUB_TOKEN secret applies without ever reaching the browser.) */
 applyLinks();
 updateCoins();
-loadEnv().finally(() => {
-  loadGitHub();
-  log(SITE_STATUS.githubToken ? '> Token loaded from .env' : '> No token (.env empty) — 60/hr limit');
-});
-// re-check live status every 5 min so it stays responsive without reload
+loadGitHub();
+log('> Loaded from local snapshot (no browser token needed)');
+logTokenStatus();
+// re-derive status from saved data every 5 min (still 0 API calls)
 setInterval(() => checkLiveStatus(), 5 * 60 * 1000);

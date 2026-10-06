@@ -15,15 +15,17 @@ window.SITE_CONFIG = {
     resume: "resume.pdf"
   },
 
-  // Status behaviour
+  // Status behaviour (all token-free — data comes from github-data.json)
   status: {
     // Manual override: true = "OPEN TO WORK", false = "BUSY / CLOSED"
-    // If null, it follows GitHub profile status ("What's happening") first,
-    // then GitHub `hireable` field when available.
+    // If null, it follows the saved snapshot's profile status first,
+    // then the saved `hireable` field when available.
     openToWork: null,
-    // Token lives in `.env` as GITHUB_TOKEN (see .env.example).
-    // Leave this "" — script.js loads .env at startup and fills it in.
-    // Create at github.com/settings/tokens (classic, no scopes needed).
+    // No token needed. To refresh the snapshot, run:
+    //   node tools/sync-github.mjs
+    // (an optional GITHUB_TOKEN env var only raises the sync-time limit;
+    // the site itself never uses it).
+    // Legacy `githubToken` key is ignored if present.
     githubToken: "",
     // Custom mapping: lowercase keyword -> badge. First partial match wins.
     statusMap: {

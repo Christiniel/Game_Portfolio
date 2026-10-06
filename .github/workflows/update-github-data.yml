@@ -1,0 +1,38 @@
+# Keeps github-data.json fresh without any browser token.
+# Runs the collector weekly (and on demand) and commits the snapshot.
+# The site itself serves the committed file — 0 API calls on normal loads.
+name: Refresh GitHub snapshot
+
+on:
+  schedule:
+    - cron: '0 2 * * 0' # Sundays 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Collect public GitHub data
+        env:
+          # Optional: add repo secret GITHUB_TOKEN_SYNC for higher limits.
+          # Falls back to unauthenticated (60 req/hr) which is enough for small accounts.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN_SYNC }}
+        run: node tools/sync-github.mjs
+      - name: Commit snapshot if changed
+        run: |
+          if git diff --quiet -- github-data.json; then
+            echo "Snapshot unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add github-data.json
+          git commit -m "chore: refresh github-data.json snapshot"
+          git push
