@@ -3,7 +3,7 @@
 # Secret (dashboard, never committed):
 #   Worker → Settings → Variables and Secrets → Add Secret → GITHUB_TOKEN → Redeploy
 
-name = "portfolio-chromete"
+name = "game-portfolio"
 main = "worker.js"
 compatibility_date = "2025-10-01"
 
