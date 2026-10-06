@@ -10,16 +10,15 @@ python -m http.server 8000
 # → http://localhost:8000
 ```
 
-## How GitHub data works (no token, no rate-limit pain)
-- The site loads **`github-data.json`** — a committed snapshot of your public
-  profile + repos (with embedded `languages` + README previews).
-- Normal page load = **0 GitHub API calls**. Status badges (ONLINE/IDLE/OFFLINE,
-  OPEN TO WORK) are derived from the saved timestamps.
-- A quiet background refresh (2 unauthenticated calls: user + repos) only runs
-  when the snapshot is older than ~24h, at most once per ~6h, and failures
-  silently keep the snapshot. Per-repo language/README hits are cached 7 days
-  in localStorage.
-- `↻ RESYNC` forces one refresh (same 2-call budget, same silent fallback).
+## How GitHub data works (live via Worker, snapshot fallback)
+- The site fetches the LATEST profile + repos + activity at runtime from
+  same-origin **`/api/github/*`**, served by `worker.js`.
+- The Worker reads the **`GITHUB_TOKEN` secret server-side** (`env.GITHUB_TOKEN`)
+  and forwards to GitHub with `Authorization: Bearer …` — the browser never
+  sees the token and never calls `api.github.com` directly.
+- If the live API is unreachable (local dev without Worker, offline), the site
+  falls back to **`github-data.json`** snapshot, then built-in demo quests.
+- `↻ RESYNC` re-fetches live data on demand.
 
 ## Refresh the snapshot
 ```powershell
@@ -33,30 +32,26 @@ node tools/sync-github.mjs
 Or let CI do it: `.github/workflows/update-github-data.yml` runs weekly and
 commits a fresh `github-data.json` (optional repo secret `GITHUB_TOKEN_SYNC`).
 
-## Cloudflare Pages — enable the GITHUB_TOKEN secret
-The browser never holds a token. Live RESYNC calls go to same-origin
-`/api/github/*`, and `functions/api/_middleware.js` injects your secret
-server-side (higher limit, secret never leaks to the client).
+## Cloudflare Worker — deploy + GITHUB_TOKEN secret
+Browser → `/api/github/*` → `worker.js` → `env.GITHUB_TOKEN` → GitHub API.
+Token value lives ONLY in the dashboard secret, never in code.
 
-1. Cloudflare dashboard → Pages → your project → **Settings → Variables and Secrets**
-2. Under **Secrets** (not just Variables) → **Add secret**:
-   - Name: `GITHUB_TOKEN`
-   - Value: your token value (classic PAT with no scopes, or fine-grained
-     public-read-only — both work for public data)
-   - Environment: tick **Production** (tick Preview too if you want previews to use it)
-3. **Redeploy** (Deployments → Retry / new commit) — env/secret changes only
-   apply on a new deployment.
-4. Verify: open `https://<your-site>.pages.dev/api/github/zen` — should return
-   a Zen message. Then click `↻ RESYNC` on the site; with the secret set the
-   resync uses the 5,000/hr authenticated budget, without it the site still
-   works via snapshot + 60/hr fallback.
+1. Deploy: `npx wrangler deploy` (uses `wrangler.toml`; static site served via
+   the Worker's `ASSETS` binding, API handled by `worker.js`).
+2. Cloudflare dashboard → your Worker → **Settings → Variables and Secrets**
+   → **Add Secret**: Name `GITHUB_TOKEN`, Value your token (classic PAT with
+   no scopes, or fine-grained public-read-only).
+3. **Redeploy** the Worker after adding the secret.
+4. Verify: open `https://<your-worker>.workers.dev/api/github/zen` — should
+   return a Zen message. The quest log reports
+   `GitHub token: IN USE via Worker (server-side) 🔒` when active.
 
 ## Features
 - 🌞 Light 8-bit theme (Press Start 2P + VT323, pixel borders, hard shadows)
 - 📱 Responsive (mobile hamburger → desktop grid)
-- 👾 **Token-free GitHub quests**: profile + repos from local snapshot
-  - hero stats (repos, total stars, followers) + avatar auto-update
-  - throttled live resync + localStorage cache, demo fallback if snapshot missing
+- 👾 **Live GitHub quests** via secure Worker (server-side token)
+  - latest repos, stars, followers, activity status at runtime
+  - snapshot + demo fallback when API unreachable
 - ✨ Interactive: typewriter, XP bars, coin clicks + counter, 8-bit WebAudio SFX, CRT toggle, Konami code (+100 coins), scroll HP bar, reveal animations, quest-log contact form
 
 ## Customize

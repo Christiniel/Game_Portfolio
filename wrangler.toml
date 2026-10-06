@@ -1,0 +1,24 @@
+# Cloudflare Worker config — static portfolio + secure GitHub proxy (worker.js).
+# Deploy with:  npx wrangler deploy
+# Secret (dashboard, never committed):
+#   Worker → Settings → Variables and Secrets → Add Secret → GITHUB_TOKEN → Redeploy
+
+name = "portfolio-chromete"
+main = "worker.js"
+compatibility_date = "2025-10-01"
+
+[assets]
+directory = "./"
+not_found_handling = "single-page-application"
+exclude = [
+  "worker.js",
+  "wrangler.toml",
+  "wrangler.jsonc",
+  "functions",
+  "tools",
+  ".github",
+  ".git",
+  ".env",
+  ".env.*",
+  "node_modules"
+]

@@ -15,18 +15,12 @@ window.SITE_CONFIG = {
     resume: "resume.pdf"
   },
 
-  // Status behaviour (all token-free — data comes from github-data.json)
+  // Live GitHub data comes from the secure Worker (/api/github/*) which uses
+  // the server-side GITHUB_TOKEN secret. No token belongs in this file.
   status: {
     // Manual override: true = "OPEN TO WORK", false = "BUSY / CLOSED"
-    // If null, it follows the saved snapshot's profile status first,
-    // then the saved `hireable` field when available.
+    // If null, it follows the live `hireable` field when available.
     openToWork: null,
-    // No token needed. To refresh the snapshot, run:
-    //   node tools/sync-github.mjs
-    // (an optional GITHUB_TOKEN env var only raises the sync-time limit;
-    // the site itself never uses it).
-    // Legacy `githubToken` key is ignored if present.
-    githubToken: "",
     // Custom mapping: lowercase keyword -> badge. First partial match wins.
     statusMap: {
       "out sick": { label: "● OUT SICK", busy: true },
