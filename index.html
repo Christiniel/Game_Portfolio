@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Christiniel — 8-Bit Portfolio</title>
+  <meta name="description" content="Light 8-bit pixel portfolio with auto GitHub repos." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23FFD93D'/><rect x='4' y='4' width='8' height='8' fill='%23000'/><rect x='6' y='6' width='2' height='2' fill='%23fff'/></svg>">
+</head>
+<body>
+  <!-- HP / scroll progress -->
+  <div id="hp-bar-wrap" title="Scroll progress">
+    <span>HP</span>
+    <div id="hp-bar"><div id="hp-fill"></div></div>
+    <span id="coin-count">🪙 0</span>
+  </div>
+
+  <!-- Scanlines overlay -->
+  <div id="scanlines" class="hidden"></div>
+  <div id="float-layer"></div>
+
+  <header class="pixel-box nav-wrap">
+    <nav class="nav">
+      <a href="#top" class="logo">▶ CHRISTINIEL</a>
+      <button id="menu-btn" aria-label="Menu">☰</button>
+      <ul id="nav-links">
+        <li><a href="#about">ABOUT</a></li>
+        <li><a href="#projects">QUESTS</a></li>
+        <li><a href="#skills">SKILLS</a></li>
+        <li><a href="#contact">TAVERN</a></li>
+        <li class="nav-controls">
+          <button id="sound-btn" title="Toggle 8-bit SFX">🔊</button>
+          <button id="scan-btn" title="Toggle CRT">📺</button>
+        </li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero pixel-box">
+      <div class="hero-grid">
+        <div class="hero-text">
+          <p class="tag">★ NEW GAME ★ LIGHT WORLD v1.0</p>
+          <h1>HI! I'M<br><span id="hero-name">CHROMETE</span></h1>
+          <p class="subtitle">&gt; <span id="typewriter"></span><span class="blink">█</span></p>
+          <p class="bio-small" id="github-bio">Full-stack dev • MongoDB tools, Flask + JS • 4 public quests. Insert coin to continue.</p>
+
+          <div class="stats-row">
+            <div class="stat pixel-box-sm"><small>LVL</small><strong id="stat-repos">--</strong></div>
+            <div class="stat pixel-box-sm"><small>STARS</small><strong id="stat-stars">--</strong></div>
+            <div class="stat pixel-box-sm"><small>FOLLOWERS</small><strong id="stat-followers">--</strong></div>
+          </div>
+
+          <div class="btn-row">
+            <a href="#projects" class="btn">▶ START QUEST</a>
+            <a href="#contact" class="btn btn-alt">TALK TO ME</a>
+          </div>
+          <p class="hint">TIP: try KONAMI CODE ↑↑↓↓←→←→BA</p>
+        </div>
+
+        <div class="hero-sprite">
+          <div class="avatar-frame pixel-box-sm">
+            <img id="avatar" src="https://avatars.githubusercontent.com/u/64506131?v=4" alt="Christiniel pixel avatar" />
+            <div class="avatar-status" id="avatar-status"><span class="dot checking" id="status-dot"></span> <span id="avatar-status-text">CHECKING…</span></div>
+            <div class="live-line"><span id="gh-dot" class="mini-dot"></span> <span id="gh-live-text">GitHub: checking…</span></div>
+          </div>
+          <div class="dialog pixel-box-sm">
+            <strong id="dialog-name">@Christiniel</strong>
+            <p>Hail, fellow gamers! I be Christiniel, a wandering scholar of code and craft. By day, I wrestle with machines, forge software, and tinker with strange contraptions; by night, I venture forth into fantastical realms, seeking glory, loot, and perhaps a quest or two.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="about" class="pixel-box reveal">
+      <h2>■ 01. ABOUT PLAYER</h2>
+      <div class="about-grid">
+        <div>
+          <p class="big-text">I build <span class="hl">playful, functional</span> website and systems with detailed code and chunky pixels.</p>
+          <p>I love JavaScript, Python/Flask, MongoDB, and open source — most recently a web-based MongoDB backup & recovery tool.</p>
+          <ul class="quest-list">
+            <li>Responsive UI</li>
+            <li>Github Actions and Modular architecture</li>
+            <li>Zero build step</li>
+          </ul>
+        </div>
+        <div class="about-card pixel-box-sm">
+          <h3>CHARACTER SHEET</h3>
+          <p><strong>CLASS:</strong> Full-Stack Dev</p>
+          <p><strong>BASE:</strong> Remote / Philippines</p>
+          <p><strong>Equipment:</strong> A strong foundation for both frontend and backend development</p>
+          <p><strong>STATUS:</strong> <span id="work-status" class="hl-green">● CHECKING…</span></p>
+          <div class="socials">
+            <a id="link-github" href="https://github.com/Christiniel" target="_blank" rel="noopener" class="btn btn-small">GITHUB</a>
+            <a id="link-linkedin" href="https://www.linkedin.com/in/christiniel-teope-0a0724421/" target="_blank" rel="noopener" class="btn btn-small btn-alt">LINKEDIN</a>
+            <a id="link-facebook" href="https://facebook.com/" target="_blank" rel="noopener" class="btn btn-small">FACEBOOK</a>
+            <a id="link-email" href="mailto:christinielrteope@gmail.com" class="btn btn-small btn-alt">EMAIL</a>
+            <a id="link-resume" href="resume.pdf" download="Christiniel-Resume.pdf" class="btn btn-small btn-alt">RESUME ↓</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROJECTS / GITHUB -->
+    <section id="projects" class="pixel-box reveal">
+      <h2>■ 02. SELECT QUEST</h2>
+
+      <div class="github-controls pixel-box-sm">
+        <div class="ctrl-row user-locked">
+          <span class="user-badge">GitHub: <strong>@Christiniel</strong></span>
+          <button id="refresh-btn" class="btn btn-small btn-alt" title="Re-sync from GitHub">↻ RESYNC</button>
+        </div>
+        <div class="ctrl-row quest-pick">
+          <label for="repo-select">CHOOSE QUEST:</label>
+          <select id="repo-select"><option>Loading quests...</option></select>
+        </div>
+        <p id="gh-status" class="status">Summoning quests...</p>
+      </div>
+
+      <div id="repo-detail"></div>
+
+      <div class="quest-nav">
+        <button id="prev-repo" class="btn btn-small">← PREV</button>
+        <span id="quest-counter" class="muted">1 / 4</span>
+        <button id="next-repo" class="btn btn-small">NEXT →</button>
+      </div>
+    </section>
+
+    <!-- SKILLS -->
+    <section id="skills" class="pixel-box reveal">
+      <h2>■ 03. SKILL TREE</h2>
+      <div class="skills-grid">
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>JavaScript</span><span>90%</span></div><div class="xp"><div data-xp="90"></div></div></div>
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>Python / Flask</span><span>80%</span></div><div class="xp"><div data-xp="80"></div></div></div>
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>MongoDB</span><span>75%</span></div><div class="xp"><div data-xp="75"></div></div></div>
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>HTML / CSS</span><span>85%</span></div><div class="xp"><div data-xp="85"></div></div></div>
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>Node / APIs</span><span>70%</span></div><div class="xp"><div data-xp="70"></div></div></div>
+        <div class="skill pixel-box-sm"><div class="skill-head"><span>Git / GitHub</span><span>85%</span></div><div class="xp"><div data-xp="85"></div></div></div>
+      </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section id="contact" class="pixel-box reveal">
+      <h2>■ 04. TAVERN (CONTACT)</h2>
+      <div class="contact-grid">
+        <form id="contact-form" class="pixel-box-sm">
+          <h3>LEAVE A QUEST NOTE</h3>
+          <label>Name<input required name="name" placeholder="Your Name" /></label>
+          <label>Email<input required type="email" name="email" placeholder="Your Email" /></label>
+          <label>Message<textarea required name="msg" rows="4" placeholder=""></textarea></label>
+          <button class="btn" type="submit">SEND ▶</button>
+          <p id="form-msg"></p>
+        </form>
+        <div class="tavern-log pixel-box-sm">
+          <h3>QUEST LOG</h3>
+          <ul id="quest-log"><li>> Welcome to the tavern...</li></ul>
+          <div class="socials">
+            <a id="tavern-email" class="btn btn-small" href="mailto:christinielrteope@gmail.com">EMAIL</a>
+            <a id="tavern-github" class="btn btn-small btn-alt" href="https://github.com/Christiniel" target="_blank" rel="noopener">GITHUB</a>
+            <a id="tavern-linkedin" class="btn btn-small" href="https://www.linkedin.com/in/christiniel-teope-0a0724421/" target="_blank" rel="noopener">LINKEDIN</a>
+            <a id="tavern-facebook" class="btn btn-small btn-alt" href="https://facebook.com/" target="_blank" rel="noopener">FACEBOOK</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p>© 2026 CHRISTINIEL (Chromete) • Built with ♥ and 8 bits • <a href="#top">↑ BACK TO TOP</a></p>
+      <p class="muted">Light 8-bit theme • Press Start 2P + VT323 • GitHub API auto-sync</p>
+    </footer>
+  </main>
+
+  <button id="to-top" title="Back to top">▲</button>
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
