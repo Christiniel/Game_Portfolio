@@ -145,43 +145,95 @@ function setGhApi(state, label){
    api.github.com directly and NEVER holds any token. Locally (no Worker)
    these requests 404 → we fall back to the github-data.json snapshot. */
 let workerAuth = null; // 'authenticated' | 'anonymous' | null (in-memory only)
+let workerAuthLen = null; // trimmed secret length reported by Worker (number only, never the value)
 
 /* Quest-log line reporting whether the server-side token is active.
-   Safe: only reports the boolean Worker flag, never any secret value. */
+   Safe: only reports the boolean Worker flag + trimmed secret length,
+   never any secret value. */
 async function logTokenStatus(){
   try{
     const r = await fetch('/api/github/zen', { cache: 'no-store' });
     if(!r.ok){ log('> GitHub link: Worker API unreachable — using saved snapshot'); return; }
     const flag = r.headers.get('x-proxy-auth');
     workerAuth = flag || 'anonymous';
+    workerAuthLen = r.headers.get('x-token-len');
   }catch(e){
     log('> GitHub link: Worker API unreachable — using saved snapshot');
     return;
   }
-  if(workerAuth === 'authenticated'){
-    log('> GitHub token: IN USE via Worker (server-side) 🔒');
+  const lenNote = workerAuthLen !== null ? ` (secret len ${workerAuthLen})` : '';
+  if(workerAuth === 'authenticated' && workerAuthLen !== '0'){
+    log(`> GitHub token: IN USE via Worker (server-side) 🔒${lenNote}`);
+  } else if(workerAuth === 'authenticated'){
+    log('> GitHub token: flag says authenticated but secret length is 0 — redeploy pending? ⚠');
   } else {
-    log('> GitHub token: NOT SET on Worker — check dashboard secret ⚠');
+    log(`> GitHub token: NOT SET on Worker — check dashboard secret ⚠${lenNote}`);
   }
 }
 
 // Same-origin GitHub read via the Worker. Throws on any failure so callers
-// can fall back to the snapshot. Never touches api.github.com directly.
+// can fall back to the snapshot. Captures GitHub's own error message +
+// rate-limit headers on the thrown error (safe: no token ever touches here).
+// Never touches api.github.com directly.
 async function gh(path, { raw = false, timeout = 10000 } = {}){
   const c = new AbortController();
   const t = setTimeout(() => c.abort(), timeout);
   try{
     const headers = { Accept: raw ? 'application/vnd.github.raw' : 'application/vnd.github+json' };
     const r = await fetch('/api/github' + path, { signal: c.signal, headers, cache: 'no-store' });
-    if(!r.ok){
-      const err = new Error('GitHub request failed (HTTP ' + r.status + ')');
-      err.status = r.status;
-      throw err;
-    }
     const flag = r.headers.get('x-proxy-auth');
     if(flag) workerAuth = flag;
+    const tokenLen = r.headers.get('x-token-len');
+    if(tokenLen !== null) workerAuthLen = tokenLen;
+    const rl = {
+      limit: r.headers.get('x-ratelimit-limit'),
+      remaining: r.headers.get('x-ratelimit-remaining'),
+      reset: r.headers.get('x-ratelimit-reset'),
+    };
+    if(!r.ok){
+      let detail = '';
+      try{
+        const ct = r.headers.get('content-type') || '';
+        if(ct.includes('json')){ const j = await r.clone().json(); detail = (j && j.message) || ''; }
+        else { detail = (await r.clone().text()).slice(0, 160); }
+      }catch(e){ detail = ''; }
+      const err = new Error('GitHub request failed (HTTP ' + r.status + ')' + (detail ? ': ' + detail : ''));
+      err.status = r.status;
+      err.detail = detail;
+      err.rate = rl;
+      err.proxyAuth = flag;
+      err.tokenLen = tokenLen;
+      throw err;
+    }
     return raw ? r.text() : r.json();
   } finally { clearTimeout(t); }
+}
+
+// Human-readable diagnosis of a live-API failure for the quest log.
+// Uses GitHub's own message + rate-limit headers; never any secret value.
+function describeGhError(err){
+  const msg = String((err && err.detail) || (err && err.message) || '');
+  const reset = err && err.rate && err.rate.reset;
+  const retry = reset ? ` retry in ~${Math.max(1, Math.round((reset * 1000 - Date.now()) / 60000))}m` : '';
+  if(err && (err.status === 401 || /bad credentials/i.test(msg))){
+    return 'GitHub says bad credentials — Worker secret invalid/expired/revoked. Replace the secret value, then redeploy.';
+  }
+  const limit = err && err.rate && err.rate.limit ? Number(err.rate.limit) : null;
+  const remaining = err && err.rate && err.rate.remaining !== null && err.rate.remaining !== undefined ? Number(err.rate.remaining) : null;
+  if(err && err.status === 403 && /rate limit/i.test(msg) && limit === 60){
+    return `Anonymous rate limit exhausted (upstream went out WITHOUT an effective token).${retry ? ' —' + retry : ''} Check secret name/target/env + redeploy.`;
+  }
+  if(err && err.status === 403 && /rate limit/i.test(msg)){
+    return `Authenticated rate limit exhausted (valid token, hour used up).${retry ? ' —' + retry : ''}`;
+  }
+  if(err && err.status === 403 && /resource not accessible/i.test(msg)){
+    return 'GitHub refused (403): token lacks permission for this resource — check token scopes.';
+  }
+  if(err && err.status === 403){
+    return `GitHub refused (403)${msg ? ': ' + msg.slice(0, 120) : ''}.${retry ? ' —' + retry : ''}`;
+  }
+  if(err && err.status){ return `HTTP ${err.status}${msg ? ': ' + msg.slice(0, 120) : ''}.`; }
+  return 'offline or unreachable.';
 }
 
 async function fetchJson(url, ms = 8000){
@@ -384,16 +436,17 @@ async function loadGitHub(opts = {}){
     log(`> Live sync from @${username} via secure Worker`);
     checkLiveStatus(user);
   }catch(err){
+    const why = describeGhError(err);
     const cached = readLiveCache();
     if(cached && cached.user){
       lastEventAt = null;
       renderFromData(cached.user, cached.repos, `✔ ${cached.repos.length} quests from last live sync (${fmtAge(new Date(cached.t).toISOString())})`);
       checkLiveStatus(cached.user);
-      log(`> Live API hiccup (${err.status || 'offline'}) — showing last live sync.`);
+      log(`> Live API hiccup (${err.status || 'offline'}): ${why} — showing last live sync.`);
       return;
     }
     await renderSnapshotFallback('live API hiccup');
-    log(`> Live API hiccup (${err.status || 'offline'}) — showing snapshot.`);
+    log(`> Live API hiccup (${err.status || 'offline'}): ${why} — showing snapshot.`);
   }
 }
 
