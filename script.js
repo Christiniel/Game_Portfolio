@@ -214,7 +214,7 @@ async function checkLiveStatus(user){
     setAvatarStatus('offline', 'OFFLINE');
   } else {
     try{
-      const events = await gh(`/users/${GITHUB_USER}/events/public?per_page=5`, { timeout: 8000 });
+      const events = await gh('/events?per_page=5', { timeout: 8000 });
       const last = events && events[0] && events[0].created_at;
       if(last) lastEventAt = last;
       if(!lastEventAt){
@@ -351,7 +351,19 @@ function renderSnapshotFallback(reason){
   });
 }
 
-// Fetch the LATEST profile + repos at runtime through the Worker.
+// Fetch the LATEST profile + ALL repos at runtime through the Worker.
+// Repos are paginated (per_page=100, up to 10 pages = 1000 repos max).
+const BUILD = 'live-worker-v2';
+async function fetchAllRepos(){
+  const all = [];
+  for(let page = 1; page <= 10; page++){
+    const batch = await gh(`/repos?per_page=100&sort=updated&page=${page}`);
+    if(!Array.isArray(batch) || !batch.length) break;
+    all.push(...batch);
+    if(batch.length < 100) break;
+  }
+  return all;
+}
 async function loadGitHub(opts = {}){
   const { forceRefresh = false } = opts;
   const username = GITHUB_USER;
@@ -361,8 +373,8 @@ async function loadGitHub(opts = {}){
 
   try{
     const [user, repos] = await Promise.all([
-      gh(`/users/${username}`),
-      gh(`/users/${username}/repos?per_page=${CONFIG.perPage}&sort=updated`),
+      gh('/profile'),
+      fetchAllRepos(),
     ]);
     if(!user || !user.login) throw new Error('GitHub user not found.');
     if(!Array.isArray(repos)) throw new Error('Could not load repos.');
@@ -582,7 +594,7 @@ $('#contact-form').addEventListener('submit',(e)=>{
 applyLinks();
 updateCoins();
 loadGitHub();
-log('> Fetching latest quests via secure Worker…');
+log(`> [${BUILD}] Fetching latest quests via secure Worker…`);
 logTokenStatus();
 // re-check live activity every 5 min (runtime fetch through Worker)
 setInterval(() => checkLiveStatus(), 5 * 60 * 1000);

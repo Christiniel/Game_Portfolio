@@ -63,7 +63,24 @@ async function handleGitHub(request, env) {
     return json({ message: 'Method not allowed (read-only proxy).' }, 405);
   }
 
-  const sub = url.pathname.replace(/^\/api\/github\/?/, '');
+  let sub = url.pathname.replace(/^\/api\/github\/?/, '');
+
+  // Convenience routes (pinned to this portfolio's user):
+  //   /api/github/profile → /users/Christiniel
+  //   /api/github/repos   → /users/Christiniel/repos (defaults per_page=100&sort=updated;
+  //                          pass ?page=2… for pagination, ?per_page=… to override)
+  //   /api/github/events  → /users/Christiniel/events/public (defaults per_page=5)
+  if (sub === 'profile') {
+    sub = `users/${GITHUB_USER}`;
+  } else if (sub === 'repos') {
+    sub = `users/${GITHUB_USER}/repos`;
+    if (!url.searchParams.has('per_page')) url.searchParams.set('per_page', '100');
+    if (!url.searchParams.has('sort')) url.searchParams.set('sort', 'updated');
+  } else if (sub === 'events') {
+    sub = `users/${GITHUB_USER}/events/public`;
+    if (!url.searchParams.has('per_page')) url.searchParams.set('per_page', '5');
+  }
+
   if (!sub || !isAllowed(sub)) {
     return json({ message: 'Not found.' }, 404);
   }
