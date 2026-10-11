@@ -1,25 +1,71 @@
 {
   "version": 1,
   "username": "Christiniel",
-  "fetchedAt": "2026-10-06T14:00:00.000Z",
-  "seeded": true,
-  "seedNote": "Seeded from last-known repo list because GitHub API rate limit was exhausted and the stored token was invalid. Run `node tools/sync-github.mjs` with a valid GITHUB_TOKEN (or wait for rate-limit reset) to refresh this snapshot.",
+  "fetchedAt": "2026-10-11T08:32:16.394Z",
   "user": {
     "login": "Christiniel",
-    "name": "Christiniel",
+    "name": "Christiniel Teope",
     "avatar_url": "https://avatars.githubusercontent.com/u/64506131?v=4",
-    "bio": "Full-stack dev • MongoDB tools, Flask + JS • 4 public quests. Insert coin to continue.",
+    "bio": null,
     "html_url": "https://github.com/Christiniel",
-    "public_repos": 4,
-    "followers": 0,
+    "public_repos": 6,
+    "followers": 1,
     "following": 0,
     "hireable": null,
-    "updated_at": "2026-09-26T10:23:33Z"
+    "updated_at": "2026-10-06T10:53:50Z"
   },
   "totalStars": 0,
-  "lastEventAt": "2026-09-26T10:23:33Z",
+  "lastEventAt": "2026-10-06T13:32:43Z",
   "profileStatus": null,
   "repos": [
+    {
+      "name": "Game_Portfolio",
+      "description": null,
+      "language": "JavaScript",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "watchers_count": 0,
+      "open_issues_count": 0,
+      "size": 56,
+      "default_branch": "master",
+      "created_at": "2026-10-06T12:00:57Z",
+      "updated_at": "2026-10-06T14:40:36Z",
+      "pushed_at": "2026-10-06T14:40:32Z",
+      "html_url": "https://github.com/Christiniel/Game_Portfolio",
+      "homepage": "",
+      "fork": false,
+      "topics": [],
+      "languages": {
+        "JavaScript": 48134,
+        "CSS": 10690,
+        "HTML": 9652
+      },
+      "readmePreview": "# PLAYER_1 — Light 8-Bit Portfolio\n\nResponsive, interactive pixel portfolio with **token-free GitHub snapshot**. No build step.\n\n## Run\nServe locally (fetch of `github-data.json` needs http, not `file://`):\n```powershell\ncd D:\\01crm\\Documents\\Projects\\Portfolio_Chromete\npython -m http.server 8000\n# → http://localhost:8000\n```\n\n## How GitHub data works (live via Worker, snapshot fallback)\n- The site fetches the LATEST profile + repos + activity at runtime from\n  same-origin **`/api/github/*`**, served by `worker.js`.\n- The Worker reads the **`GITHUB_TOKEN` secret server-side** (`env.GITHUB_TOKEN`)\n  and forwards to GitHub with `Authorization: Bearer …` — the browser never\n  sees the token and never calls `api.github.com` directly.\n- If the live API is unreachable (local dev without Worker, offline), the site\n  falls back to **`github-data.json`** snapshot, then built-in demo quests.\n- `↻ RESYNC` re-fetches live data on demand.\n\n## Refresh the snapshot\n```powershell\n# Unauthenticated is fine for small accounts (60 req/hr):\nnode tools/sync-github.mjs\n\n# With higher limit (only at sync time — never in the browser):\n$env:GITHUB_TOKEN=\"ghp_...\"\nnode tools/sync-github.mjs\n```\nOr let CI do"
+    },
+    {
+      "name": "Main_Portfolio",
+      "description": "Main displayed portfolio for generalized description",
+      "language": "HTML",
+      "stargazers_count": 0,
+      "forks_count": 0,
+      "watchers_count": 0,
+      "open_issues_count": 0,
+      "size": 8,
+      "default_branch": "master",
+      "created_at": "2026-10-06T11:28:10Z",
+      "updated_at": "2026-10-06T11:42:57Z",
+      "pushed_at": "2026-10-06T11:42:52Z",
+      "html_url": "https://github.com/Christiniel/Main_Portfolio",
+      "homepage": "",
+      "fork": false,
+      "topics": [],
+      "languages": {
+        "HTML": 14812,
+        "CSS": 7515,
+        "JavaScript": 2852
+      },
+      "readmePreview": "# Christiniel Teope — Portfolio\n\nModern minimal portfolio for **Christiniel Teope, Backend Developer**.\n\nLive links:\n- GitHub: https://github.com/Christiniel\n- Facebook: https://www.facebook.com/christiniel.teope\n- LinkedIn: https://www.linkedin.com/in/christiniel-teope-0a0724421/\n\n## Run locally\nJust open `index.html` in a browser. No build step.\n\nOr serve:\n```\nnpx serve .\n# or\npython -m http.server 8000\n```\n\n## Deploy to GitHub Pages (free)\n1. Create repo `Christiniel.github.io` (or `portfolio`)\n2. Push these files (`index.html`, `styles.css`, `script.js`)\n3. Settings → Pages → Deploy from branch → `main` / root\n4. Your site goes live at `https://christiniel.github.io/`\n\n## Customize\n- Edit name/role in `index.html` hero\n- Update projects section to add new repos\n- Change contact email in `script.js` → `sendMail()`\n- Theme colors in `styles.css` → `:root`\n"
+    },
     {
       "name": "MongoBackupRecovery",
       "description": "An Web-based back up and recovery tool for MongoDB",
@@ -32,21 +78,22 @@
       "default_branch": "main",
       "created_at": "2026-09-26T10:02:46Z",
       "updated_at": "2026-09-26T10:23:33Z",
-      "pushed_at": "2026-09-26T10:23:33Z",
+      "pushed_at": "2026-09-26T10:23:30Z",
       "html_url": "https://github.com/Christiniel/MongoBackupRecovery",
       "homepage": "",
       "fork": false,
       "topics": [],
       "languages": {
-        "JavaScript": 20000,
-        "HTML": 4000,
-        "CSS": 2000
+        "JavaScript": 28008,
+        "CSS": 7856,
+        "HTML": 6684,
+        "Dockerfile": 739
       },
-      "readmePreview": null
+      "readmePreview": "# MongoDB Backup & Restore Website\n\nSimple web UI that runs `mongodump` (backup) and `mongorestore` (restore) on the server.\n\n## Requirements\n\n- Node.js 18+\n- MongoDB Database Tools installed (`mongodump`, `mongorestore` in PATH)\n  - Check: `mongodump --version` / `mongorestore --version`\n- A reachable MongoDB (`mongodb://...` or `mongodb+srv://...`)\n\n## Setup\n\n```powershell\nnpm install\nnpm start\n```\n\nOpen http://localhost:3000\n\nSet a custom port:\n\n```powershell\n$env:PORT=4000; npm start\n```\n\n## How it works\n\n| Action | Tool command run on server |\n|---|---|\n| Backup | `mongodump --uri=<source> [--db=<db>] --archive=backups/<file> [--gzip]` |\n| Restore (upload) | `mongorestore --uri=<target> [--db=<db>] [--drop] [--gzip] --archive=uploads/<file>` |\n| Restore (server file) | `mongorestore --uri=<target> --archive=backups/<file> ...` |\n\n- Backups are stored in `./backups/` and can be downloaded from the Library tab.\n- Uploads go to `./uploads/`.\n- Passwords in URIs are masked (`****`) in logs and console output.\n- Use `--drop` carefully: it deletes the target database/collection before restoring.\n\n## API\n\n- `GET /api/health` — tool versions\n- `POST /api/databases { uri }` — list data"
     },
     {
       "name": "SIA-Lab",
-      "description": "Mysterious quest — no description yet.",
+      "description": null,
       "language": "JavaScript",
       "stargazers_count": 0,
       "forks_count": 1,
@@ -56,16 +103,15 @@
       "default_branch": "main",
       "created_at": "2026-04-22T09:01:19Z",
       "updated_at": "2026-04-22T09:02:38Z",
-      "pushed_at": "2026-04-22T09:02:38Z",
+      "pushed_at": "2026-04-22T09:03:57Z",
       "html_url": "https://github.com/Christiniel/SIA-Lab",
       "homepage": "",
       "fork": false,
       "topics": [],
       "languages": {
-        "JavaScript": 15000,
-        "HTML": 3000
+        "JavaScript": 4346
       },
-      "readmePreview": null
+      "readmePreview": "# 🚀 Getting started with Strapi\n\nStrapi comes with a full featured [Command Line Interface](https://docs.strapi.io/dev-docs/cli) (CLI) which lets you scaffold and manage your project in seconds.\n\n### `develop`\n\nStart your Strapi application with autoReload enabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-develop)\n\n```\nnpm run develop\n# or\nyarn develop\n```\n\n### `start`\n\nStart your Strapi application with autoReload disabled. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-start)\n\n```\nnpm run start\n# or\nyarn start\n```\n\n### `build`\n\nBuild your admin panel. [Learn more](https://docs.strapi.io/dev-docs/cli#strapi-build)\n\n```\nnpm run build\n# or\nyarn build\n```\n\n## ⚙️ Deployment\n\nStrapi gives you many possible deployment options for your project including [Strapi Cloud](https://cloud.strapi.io). Browse the [deployment section of the documentation](https://docs.strapi.io/dev-docs/deployment) to find the best solution for your use case.\n\n```\nyarn strapi deploy\n```\n\n## 📚 Learn more\n\n- [Resource center](https://strapi.io/resource-center) - Strapi resource center.\n- [Strapi documentation](https://docs.strapi.io) - Official Strapi documentation.\n- [Strapi tutorials](htt"
     },
     {
       "name": "solaris-collab",
@@ -79,21 +125,21 @@
       "default_branch": "main",
       "created_at": "2026-03-30T03:39:18Z",
       "updated_at": "2026-03-30T11:01:09Z",
-      "pushed_at": "2026-03-30T11:01:09Z",
+      "pushed_at": "2026-03-30T11:00:57Z",
       "html_url": "https://github.com/Christiniel/solaris-collab",
       "homepage": "",
       "fork": false,
       "topics": [],
       "languages": {
-        "JavaScript": 50000,
-        "CSS": 8000,
-        "HTML": 5000
+        "JavaScript": 999381,
+        "CSS": 347773,
+        "HTML": 829
       },
       "readmePreview": null
     },
     {
       "name": "flask-mssql-app",
-      "description": "Flask + MSSQL app.",
+      "description": null,
       "language": "Python",
       "stargazers_count": 0,
       "forks_count": 0,
@@ -103,14 +149,14 @@
       "default_branch": "main",
       "created_at": "2025-10-06T12:13:55Z",
       "updated_at": "2025-10-09T13:04:44Z",
-      "pushed_at": "2025-10-09T13:04:44Z",
+      "pushed_at": "2025-10-09T13:04:40Z",
       "html_url": "https://github.com/Christiniel/flask-mssql-app",
       "homepage": "",
       "fork": false,
       "topics": [],
       "languages": {
-        "Python": 12000,
-        "HTML": 2000
+        "Python": 4880,
+        "Procfile": 22
       },
       "readmePreview": null
     }
